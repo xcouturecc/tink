@@ -1,0 +1,147 @@
+name: Mobile clients
+
+on:
+  push:
+    branches:
+      - feat/mobile-clients
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch:
+
+env:
+  MOBILE_VERSION: "0.1.0-beta.2"
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.12"
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          mkdir -p "$SDK_ROOT/cmdline-tools"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager -print -quit 2>/dev/null || true)"
+          if [[ -z "$SDKMANAGER" ]]; then
+            curl -fLsS -o /tmp/android-cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            mkdir -p "$SDK_ROOT/cmdline-tools/latest" /tmp/android-cli
+            unzip -q /tmp/android-cmdline-tools.zip -d /tmp/android-cli
+            mv /tmp/android-cli/cmdline-tools/* "$SDK_ROOT/cmdline-tools/latest/"
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-35" "build-tools;35.0.0"
+      - name: Build Android debug APK
+        working-directory: mobile/android
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Name APK for release
+        run: |
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk \
+             "mobile/android/app/build/outputs/apk/debug/Tink-Android-v${MOBILE_VERSION}-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tink-android-debug
+          path: mobile/android/app/build/outputs/apk/debug/Tink-Android-v*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+  ios:
+    name: iOS build + unsigned IPA
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: mobile/ios
+        run: xcodegen generate
+      - name: Compile iOS Simulator app
+        working-directory: mobile/ios
+        run: >
+          xcodebuild -project TinkMobile.xcodeproj
+          -scheme TinkMobile
+          -configuration Debug
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
+      - name: Build unsigned iOS device app
+        working-directory: mobile/ios
+        run: >
+          xcodebuild -project TinkMobile.xcodeproj
+          -scheme TinkMobile
+          -configuration Debug
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/tink-ios-device-build"
+          CODE_SIGNING_ALLOWED=NO
+          build
+      - name: Package unsigned IPA for local re-signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/tink-ios-device-build/Build/Products/Debug-iphoneos/TinkMobile.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/ipa-staging/Payload"
+          ditto "$APP" "$RUNNER_TEMP/ipa-staging/Payload/TinkMobile.app"
+          (cd "$RUNNER_TEMP/ipa-staging" && zip -qry "$GITHUB_WORKSPACE/mobile/ios/Tink-iOS-v${MOBILE_VERSION}-unsigned.ipa" Payload)
+          unzip -t "mobile/ios/Tink-iOS-v${MOBILE_VERSION}-unsigned.ipa" | tail -n 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tink-ios-unsigned-ipa
+          path: mobile/ios/Tink-iOS-v*-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish mobile prerelease (APK + unsigned IPA)
+    needs: [android, ios]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feat/mobile-clients' && contains(github.event.head_commit.message, '[mobile-release]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tink-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="mobile-v${MOBILE_VERSION}"
+          ls -lah release-assets/
+          APK="release-assets/Tink-Android-v${MOBILE_VERSION}-debug.apk"
+          IPA="release-assets/Tink-iOS-v${MOBILE_VERSION}-unsigned.ipa"
+          test -s "$APK"
+          test -s "$IPA"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to overwrite assets or move an existing tag."
+            exit 1
+          fi
+          gh release create "$TAG" "$APK" "$IPA" \
+            --target "$GITHUB_SHA" \
+            --title "Tink Mobile v${MOBILE_VERSION} (Preview)" \
+            --prerelease \
+            --notes "Android: debug-signed APK, intended for testing only. iOS: **UNSIGNED device IPA**, intended for re-signing with your own valid Apple certificate and matching provisioning profile. It cannot be installed directly. Updated Android/iOS app icons using upstream Tink artwork; refreshed native UI and status bar icon. The existing Go server and macOS app are unchanged. Current mobile clients receive SSE notifications while in the foreground; **lock-screen/background push via APNs/FCM is not implemented**. See mobile/README.md for instructions."
