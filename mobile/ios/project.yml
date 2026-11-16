@@ -9,12 +9,19 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      - path: Resources/Assets.xcassets
+    preBuildScripts:
+      - name: Prepare Tink App Icon
+        basedOnDependencyAnalysis: false
+        script: |
+          swift "$SRCROOT/prepare_icons.swift" "$SRCROOT/../../docs/logo/tink-logo-dark-1024.png" "$SRCROOT/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cc.xcouture.tink.mobile
         SWIFT_VERSION: "5.0"
         GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_KEY_CFBundleDisplayName: "Tink Mobile"
+        INFOPLIST_KEY_CFBundleDisplayName: "Tink"
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic

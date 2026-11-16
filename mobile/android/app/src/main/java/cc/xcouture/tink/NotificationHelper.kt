@@ -39,7 +39,7 @@ internal class NotificationHelper(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = Notification.Builder(context, "tink_messages")
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setSmallIcon(R.drawable.ic_stat_tink)
             .setContentTitle(message.title.ifBlank { "Tink" })
             .setContentText(message.body)
             .setStyle(Notification.BigTextStyle().bigText(message.body))

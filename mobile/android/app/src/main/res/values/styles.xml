@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tink_icon_background">#101B31</color>
+    <style name="Theme.Tink" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#F4F6FB</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F4F6FB</item>
+    </style>
+</resources>
