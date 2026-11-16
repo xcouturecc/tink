@@ -105,6 +105,7 @@ final class TinkModel: ObservableObject {
                     server: server, path: "/api/v1/events", token: token, deviceID: currentDevice
                 )
                 request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                request.timeoutInterval = 3_600 // SSE heartbeat is 30s; avoid a 30s idle timeout.
                 request.setValue(preferences.string(forKey: cursorKey) ?? "0", forHTTPHeaderField: "Last-Event-ID")
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
                 guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
