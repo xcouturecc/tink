@@ -14,7 +14,7 @@ targets:
       - name: Prepare Tink App Icon
         basedOnDependencyAnalysis: false
         script: |
-          swift "$SRCROOT/prepare_icons.swift" "$SRCROOT/../../docs/logo/tink-logo-dark-1024.png" "$SRCROOT/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" swift "$SRCROOT/prepare_icons.swift" "$SRCROOT/../../docs/logo/tink-logo-dark-1024.png" "$SRCROOT/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: cc.xcouture.tink.mobile
