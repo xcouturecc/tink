@@ -16,8 +16,8 @@ guard let rep = NSBitmapImageRep(
     pixelsWide: size,
     pixelsHigh: size,
     bitsPerSample: 8,
-    samplesPerPixel: 3,
-    hasAlpha: false,
+    samplesPerPixel: 4,
+    hasAlpha: true,
     isPlanar: false,
     colorSpaceName: .deviceRGB,
     bytesPerRow: 0,
@@ -34,11 +34,32 @@ image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1)
 context.flushGraphics()
 NSGraphicsContext.restoreGraphicsState()
 guard let data = rep.representation(using: .png, properties: [:]) else {
-    fatalError("Could not encode AppIcon.png")
+    fatalError("Could not encode intermediate AppIcon.png")
 }
+let outputURL = URL(fileURLWithPath: output)
 try FileManager.default.createDirectory(
-    at: URL(fileURLWithPath: output).deletingLastPathComponent(),
+    at: outputURL.deletingLastPathComponent(),
     withIntermediateDirectories: true
 )
-try data.write(to: URL(fileURLWithPath: output), options: .atomic)
-print("Generated opaque 1024x1024 iOS AppIcon")
+let tempDirectory = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+defer { try? FileManager.default.removeItem(at: tempDirectory) }
+let rgbaURL = tempDirectory.appendingPathComponent("composited.png")
+let jpegURL = tempDirectory.appendingPathComponent("opaque.jpg")
+try data.write(to: rgbaURL)
+
+func runSips(_ arguments: [String]) throws {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/sips")
+    task.arguments = arguments
+    try task.run()
+    task.waitUntilExit()
+    guard task.terminationStatus == 0 else {
+        fatalError("sips failed with exit code \(task.terminationStatus)")
+    }
+}
+// JPEG strips the alpha channel; convert back to PNG for the asset catalog.
+try runSips(["-s", "format", "jpeg", rgbaURL.path, "--out", jpegURL.path])
+try runSips(["-s", "format", "png", jpegURL.path, "--out", outputURL.path])
+print("Generated opaque RGB 1024x1024 iOS AppIcon")
