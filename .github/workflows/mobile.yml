@@ -13,6 +13,12 @@ on:
       - ".github/workflows/mobile.yml"
   workflow_dispatch:
 
+env:
+  MOBILE_VERSION: "0.1.0-beta.1"
+
+permissions:
+  contents: read
+
 jobs:
   android:
     name: Android debug APK
@@ -42,17 +48,22 @@ jobs:
           echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
           yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
           "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-35" "build-tools;35.0.0"
-      - name: Build debug APK
+      - name: Build Android debug APK
         working-directory: mobile/android
         run: gradle --no-daemon :app:assembleDebug
+      - name: Name APK for release
+        run: |
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk \
+             "mobile/android/app/build/outputs/apk/debug/Tink-Android-v${MOBILE_VERSION}-debug.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: tink-android-debug
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          path: mobile/android/app/build/outputs/apk/debug/Tink-Android-v*.apk
           if-no-files-found: error
+          retention-days: 30
 
   ios:
-    name: iOS Simulator compile
+    name: iOS build + unsigned IPA
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -71,3 +82,66 @@ jobs:
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
           build
+      - name: Build unsigned iOS device app
+        working-directory: mobile/ios
+        run: >
+          xcodebuild -project TinkMobile.xcodeproj
+          -scheme TinkMobile
+          -configuration Debug
+          -sdk iphoneos
+          -destination 'generic/platform=iOS'
+          -derivedDataPath "$RUNNER_TEMP/tink-ios-device-build"
+          CODE_SIGNING_ALLOWED=NO
+          build
+      - name: Package unsigned IPA for local re-signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/tink-ios-device-build/Build/Products/Debug-iphoneos/TinkMobile.app"
+          test -d "$APP"
+          mkdir -p "$RUNNER_TEMP/ipa-staging/Payload"
+          ditto "$APP" "$RUNNER_TEMP/ipa-staging/Payload/TinkMobile.app"
+          (cd "$RUNNER_TEMP/ipa-staging" && zip -qry "$GITHUB_WORKSPACE/mobile/ios/Tink-iOS-v${MOBILE_VERSION}-unsigned.ipa" Payload)
+          unzip -t "mobile/ios/Tink-iOS-v${MOBILE_VERSION}-unsigned.ipa" | tail -n 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tink-ios-unsigned-ipa
+          path: mobile/ios/Tink-iOS-v*-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish mobile prerelease (APK + unsigned IPA)
+    needs: [android, ios]
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/feat/mobile-clients' && contains(github.event.head_commit.message, '[mobile-release]') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tink-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="mobile-v${MOBILE_VERSION}"
+          ls -lah release-assets/
+          APK="release-assets/Tink-Android-v${MOBILE_VERSION}-debug.apk"
+          IPA="release-assets/Tink-iOS-v${MOBILE_VERSION}-unsigned.ipa"
+          test -s "$APK"
+          test -s "$IPA"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release already exists; refusing to overwrite assets or move an existing tag."
+            exit 1
+          fi
+          gh release create "$TAG" "$APK" "$IPA" \
+            --target "$GITHUB_SHA" \
+            --title "Tink Mobile v${MOBILE_VERSION} (Preview)" \
+            --prerelease \
+            --notes "Android: debug-signed APK, intended for testing only. iOS: **UNSIGNED device IPA**, intended for re-signing with your own valid Apple certificate and matching provisioning profile. It cannot be installed directly. The existing Go server and macOS app are unchanged. Current mobile clients receive SSE notifications while in the foreground; **lock-screen/background push via APNs/FCM is not implemented**. See mobile/README.md for instructions."

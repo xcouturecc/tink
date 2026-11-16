@@ -1,48 +1,51 @@
-# Tink Mobile — first development milestone
+# Tink Mobile — v0.1.0-beta.1
 
-Native mobile client foundations for the existing Tink self-hosted notification gateway.
+Native Android and iOS clients for the [Tink self-hosted notification gateway](https://github.com/mrasong/tink). The original macOS client, Go server, and dashboard are unchanged.
 
-| Client | Stack | Implemented | Still missing |
-| --- | --- | --- | --- |
-| iOS 17+ | SwiftUI / URLSession | Device registration, foreground SSE, offline replay, local notifications, local message history, Keychain bearer auth, test push | APNs, background push, production signing |
-| Android 8+ | Kotlin / Jetpack Compose / OkHttp | Device registration, foreground SSE, offline replay, local notifications, local message history, Android Keystore bearer auth, test push | FCM/OEM push, reliable background delivery, production signing |
+## Download
 
-The original macOS client, Go backend and Svelte dashboard are unchanged.
+The preview is released from the mobile development branch under [Releases](https://github.com/xcouturecc/tink/releases), tagged `mobile-v0.1.0-beta.1`.
 
-## Android quick start
+- `Tink-Android-v0.1.0-beta.1-debug.apk`: Android 8+ **debug-signed** test APK; install on your Android device after allowing this source to install apps.
+- `Tink-iOS-v0.1.0-beta.1-unsigned.ipa`: **unsigned**, iPhone/iPad device build for local re-signing. **Not installable as-is.** An Apple-signed developer/distribution certificate **and matching provisioning profile** are required to produce an installable build; simply using an arbitrary self-issued certificate is insufficient under standard iOS installation rules. Use an authorized local signing tool, or build via Xcode with your own team and device provisioning.
 
-1. Open mobile/android in Android Studio with JDK 17 and Android SDK 35.
-2. Allow Gradle sync, then build/run the app module on an Android 8+ device.
-3. Enter your own Tink HTTPS server root URL and Bearer Secret Key, then tap 保存并连接.
-4. Grant notification permission (Android 13+) and tap 发送测试通知.
+**Keep your certificate private.** Do not upload a .p12, password, provisioning profile, or APNs private key to a public repository. This workflow creates unsigned iOS packages and does not require Apple credentials.
 
-CLI: from mobile/android run gradle :app:assembleDebug (Gradle 8.12, SDK 35).
+## Capabilities
 
-Successful GitHub Actions builds upload a debug APK artifact named tink-android-debug.
+| Platform | Implemented | Missing |
+| --- | --- | --- |
+| iOS 17+ (SwiftUI) | Register a device, SSE reception while app is foregrounded, automatic reconnection, offline replay, local message history, Keychain token storage, test notification | APNs/background delivery, signed IPA, device testing |
+| Android 8+ (Kotlin + Compose) | Register a device, SSE reception while app is foregrounded, automatic reconnection, offline replay, local message history, Keystore token storage, test notification | FCM/OEM background push, device testing, release signing |
 
-## iOS quick start
+**Critical:** this version does not deliver reliable push notifications when the app is backgrounded, suspended, locked, or terminated. This is an early functional preview, not a replacement for Bark or a production alerting system.
 
-1. Install XcodeGen and Xcode 16+.
-2. From mobile/ios run xcodegen generate.
-3. Open TinkMobile.xcodeproj, select your Apple development team and run on iOS 17+.
-4. Enter your own Tink HTTPS server root URL and Bearer Secret Key, then tap 保存并连接.
+## Android development
 
-CI compiles an unsigned iOS Simulator build only. Installing on an iPhone requires valid development signing. No signed IPA or TestFlight release is available yet.
+Open `mobile/android` in Android Studio with JDK 17 and SDK 35, sync Gradle and run `app`. The workflow uses Gradle 8.12 to build the debug APK.
 
-## Existing API endpoints
+## iOS development / local signing
 
-- POST /api/v1/devices registers a persistent device UUID (scoped to the bearer key).
-- GET /api/v1/events subscribes to SSE using X-Device-ID and Last-Event-ID.
-- POST /api/v1/messages sends a test notification to the newly registered device.
+1. Install Xcode 16+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+2. Run `cd mobile/ios && xcodegen generate`.
+3. Open `TinkMobile.xcodeproj` in Xcode.
+4. Select a suitable Apple development team and configure the bundle ID and provisioning for your iPhone.
+5. Build and run the application from Xcode; or re-sign the **unsigned IPA** locally using your valid certificate and provisioning profile.
 
-Message history is local (max 250), with server-side offline replay limited to 200 messages and retention of 7 days. The server does not provide an arbitrary history listing API. Editing and saving connection credentials resets local history and replay cursor.
+CI also compiles for the iOS Simulator, but the downloadable IPA contains the **iphoneos** build, not a simulator app.
 
-## Critical background limitation
+## Existing server API
 
-SSE is not a replacement for platform push notifications. These clients **stop listening when backgrounded**; they do not reliably display notifications while locked or terminated. Do not depend on this milestone for critical alerts.
+- `POST /api/v1/devices`: register a phone UUID against a Bearer key.
+- `GET /api/v1/events`: foreground SSE with `X-Device-ID` and `Last-Event-ID` replay.
+- `POST /api/v1/messages`: send a test notification.
 
-Next milestone: server-side device push subscriptions and APNs, FCM/Android OEM provider dispatch, deduplication/retry observability, tests and signed releases. iOS APNs requires Apple developer push credentials, while FCM requires Firebase configuration; neither should be checked into source control.
+Use a trusted **HTTPS** Tink server endpoint with your own Bearer token. The server retains notifications for up to 7 days and replays up to 200 messages; the phone stores up to 250 local messages. Saving a new connection configuration clears the local history and replay cursor.
 
-## Security / license
+## Publishing
 
-HTTPS is required and Android cleartext is disabled. Place a self-hosted Tink server behind a trusted HTTPS reverse proxy. Bearer secrets are stored via Keychain or Android Keystore, and must never be committed. Original project: https://github.com/mrasong/tink, licensed under MIT. Keep the root LICENSE intact and preserve original attribution.
+`.github/workflows/mobile.yml` builds both platforms on pushes to `feat/mobile-clients` and provides artifacts. Commits containing `[mobile-release]` on that branch, when both builds succeed, publish APK and unsigned IPA to a **GitHub prerelease**. Use a new `MOBILE_VERSION` value for subsequent releases; the action does not overwrite existing release tags.
+
+## License
+
+Based on [mrasong/tink](https://github.com/mrasong/tink), under the MIT license. Preserve the repository's original `LICENSE`.
